@@ -1,0 +1,32 @@
+# =============================================================================
+# T12 — Docker Compose pour l'API de trading GBP/USD M15
+# =============================================================================
+# Service principal : trading-api
+# - Build depuis le Dockerfile
+# - Port 8000 exposé
+# - Volume pour les modèles (mise à jour sans rebuild)
+# =============================================================================
+
+version: "3.8"
+
+services:
+  trading-api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: trading-api
+    ports:
+      - "8000:8000"
+    volumes:
+      # Volume pour les modèles : permet de mettre à jour les modèles
+      # sans avoir à reconstruire l'image Docker
+      - ../models:/app/models
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s

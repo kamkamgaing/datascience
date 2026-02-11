@@ -1,6 +1,7 @@
-# Données brutes
+# Donnees brutes
 *.csv
 *.txt
+!docker/requirements.txt
 
 # Données intermédiaires
 *.parquet

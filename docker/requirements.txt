@@ -1,0 +1,25 @@
+# T12 — Dépendances pour l'API de trading GBP/USD M15
+# =====================================================
+
+# API
+fastapi
+uvicorn[standard]
+pydantic
+
+# Data processing
+pandas
+numpy
+pyarrow
+
+# ML classique
+scikit-learn
+xgboost
+lightgbm
+joblib
+
+# Reinforcement Learning
+stable-baselines3
+gymnasium
+
+# Utilitaires
+torch
