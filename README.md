@@ -39,8 +39,25 @@ project/
 11. **T11** — Versioning modèle (registry)
 12. **T12** — Docker
 
-## Données
+## Donnees
 
-- 2022 : Entraînement
+- 2022 : Entrainement
 - 2023 : Validation
-- 2024 : Test final (jamais utilisé pour entraîner)
+- 2024 : Test final (jamais utilise pour entrainer)
+
+## Backlog des taches
+
+| ID  | Tache                                  | Responsable | Branche Git                   |
+|-----|----------------------------------------|-------------|-------------------------------|
+| T01 | Import M1 + controle regularite        | dany        | dany__T01__import_m1          |
+| T02 | Agregation M1 -> M15                   | dany        | dany__T02__m15_agg            |
+| T03 | Nettoyage M15 + rapport qualite        | dany        | dany__T03__cleaning_m15       |
+| T04 | Analyse exploratoire + ADF/ACF         | dany        | dany__T04__eda                |
+| T05 | Feature Pack V2 (court terme + regime) | dany        | dany__T05__features           |
+| T06 | Baseline regles + backtest simple      | dany        | dany__T06__baselines          |
+| T07 | ML (split temporel + modeles + eval)   | dany        | dany__T07__ml_training        |
+| T08 | RL (env + reward + entrainement)       | dany        | dany__T08__rl_env             |
+| T09 | Evaluation robuste (benchmarks + 2024) | dany        | dany__T09__evaluation         |
+| T10 | API (contrat + endpoints + modele)     | dany        | dany__T10__api_predict        |
+| T11 | Versioning modele (v1/v2 + registry)   | dany        | dany__T11__model_versioning   |
+| T12 | Docker + execution reproductible       | dany        | dany__T12__docker             |
