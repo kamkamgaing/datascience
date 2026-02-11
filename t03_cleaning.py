@@ -3,7 +3,6 @@ T03 — Nettoyage M15
 =====================
 - Suppression bougies incomplètes (m1_count < 15)
 - Contrôle prix négatifs
-- Détection et rapport des gaps anormaux
 - Sauvegarde M15 propre
 """
 
