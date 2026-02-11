@@ -657,7 +657,7 @@ def main():
                  df, returns)
 
     print(f"\n{'='*60}")
-    print("  T04 TERMINÉ ✓")
+    print("  T04 TERMINE")
     print(f"  Fichiers générés dans {OUTPUT_DIR}/ :")
     print("    - eda_returns_distribution.png")
     print("    - eda_volatility.png")

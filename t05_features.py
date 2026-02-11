@@ -204,7 +204,7 @@ def main():
     print(f"  Temporel      (9) : hour, day_of_week, sessions, encodage cyclique")
 
     print(f"\n{'='*60}")
-    print("  T05 TERMINÉ ✓")
+    print("  T05 TERMINE")
     print(f"{'='*60}")
 
 

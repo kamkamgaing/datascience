@@ -342,7 +342,7 @@ def main():
               f"{sub['win_rate'].mean():>10.2%}")
 
     print(f"\n{'='*90}")
-    print("  T06 TERMINÉ ✓")
+    print("  T06 TERMINE")
     print(f"  Fichiers générés dans {OUTPUT_DIR}/ :")
     print("    - baseline_results.csv")
     print("    - baseline_equity_curves.png")

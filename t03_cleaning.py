@@ -197,7 +197,7 @@ def main():
         print(f"  Rapport gaps → {GAPS_PATH}")
 
     print(f"\n{'='*60}")
-    print("  T03 TERMINÉ ✓")
+    print("  T03 TERMINE")
     print(f"{'='*60}")
 
     return df

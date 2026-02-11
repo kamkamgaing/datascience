@@ -110,7 +110,7 @@ def main():
     print(f"  Taille : {os.path.getsize(OUTPUT_PATH) / 1e6:.1f} MB")
 
     print(f"\n{'='*60}")
-    print("  T02 TERMINÉ ✓")
+    print("  T02 TERMINE")
     print(f"{'='*60}")
 
     return df_15m

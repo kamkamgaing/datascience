@@ -342,10 +342,10 @@ def main():
     print(f"\n  {'Modèle':<22} {'AUC':>7} {'F1':>7} {'Sharpe':>8} {'Profit':>10} {'Trades':>8} {'WR':>6}")
     print(f"  {'─' * 70}")
     for _, row in df_results.iterrows():
-        marker = " ★" if row["model"] == best_model_name else ""
+        marker = " <-- BEST" if row["model"] == best_model_name else ""
         print(f"  {row['model']:<22} {row['auc_roc']:>7.4f} {row['f1_score']:>7.4f} {row['sharpe']:>8.4f} {row['profit_pips']:>+10.1f} {row['n_trades']:>8,} {row['win_rate']:>5.1f}%{marker}")
 
-    print(f"\n  ★ Meilleur modèle (Sharpe) : {best_model_name} — Sharpe = {best_sharpe:.4f}")
+    print(f"\n  >> Meilleur modele (Sharpe) : {best_model_name} -- Sharpe = {best_sharpe:.4f}")
 
     # Sauvegarder comparaison
     comparison_path = os.path.join(EVAL_DIR, "ml_comparison.csv")
@@ -430,7 +430,7 @@ def main():
     print(f"  Win rate   : {bt_test['win_rate']:.1f}%")
 
     print(f"\n{'='*70}")
-    print(f"  T07 TERMINÉ ✓ — Meilleur modèle : {best_model_name}")
+    print(f"  T07 TERMINE -- Meilleur modele : {best_model_name}")
     print(f"{'='*70}")
 
 

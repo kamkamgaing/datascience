@@ -208,7 +208,7 @@ def main():
     print(f"  Rapport qualité → {report_path}")
 
     print(f"\n{'='*60}")
-    print("  T01 TERMINÉ ✓")
+    print("  T01 TERMINE")
     print(f"{'='*60}")
 
     return df_combined
