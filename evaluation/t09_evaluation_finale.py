@@ -1,22 +1,20 @@
 """
-T09 -- Evaluation Finale : Comparaison de toutes les strategies sur 2024
-=========================================================================
-Comparaison obligatoire (cf. cahier des charges) :
+T09 -- Evaluation Finale : Comparaison de toutes les strategies + Stress Tests
+================================================================================
+Comparaison obligatoire :
   - Random
   - Regles (EMA Cross 20/50)
   - ML (meilleur modele)
   - RL (PPO)
 
-Metriques :
-  - Profit cumule (pips)
-  - Maximum drawdown (pips)
-  - Sharpe ratio simplifie
-  - Profit factor
+Metriques : Profit cumule, Max Drawdown, Sharpe, Profit Factor
+
+Stress Tests : impact du spread (1-5 pips)
 
 Sorties :
   - evaluation/final_comparison.csv
   - evaluation/final_equity_curves.png
-  - evaluation/final_comparison_table.txt
+  - evaluation/final_stress_test.csv
 """
 
 import os
@@ -34,369 +32,255 @@ import matplotlib.dates as mdates
 
 warnings.filterwarnings("ignore")
 
-# Ajouter le projet root au path
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
-# =============================================================================
-# Configuration
-# =============================================================================
 FEATURES_DIR = os.path.join(PROJECT_ROOT, "features")
 MODELS_DIR = os.path.join(PROJECT_ROOT, "models")
 EVAL_DIR = os.path.join(PROJECT_ROOT, "evaluation")
 DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 
-SPREAD_PIPS = 2
 PIP_VALUE = 0.0001
-SPREAD_COST = SPREAD_PIPS * PIP_VALUE
-ANNUALIZATION = np.sqrt(252 * 24 * 4)  # M15 annualization
+ANNUALIZATION = np.sqrt(252 * 96)
 
 
-# =============================================================================
-# Utilitaires communs
-# =============================================================================
-def compute_metrics(pnl_per_bar, positions, label=""):
-    """Calcule les 4 metriques obligatoires + extras."""
-    cumulative = np.cumsum(pnl_per_bar)
-    total_profit = cumulative[-1] if len(cumulative) > 0 else 0.0
-
-    # Max Drawdown
+def compute_metrics(pnl_pips, label, spread=2):
+    cumulative = np.cumsum(pnl_pips)
+    total = float(cumulative[-1]) if len(cumulative) > 0 else 0.0
     running_max = np.maximum.accumulate(cumulative)
-    drawdown = running_max - cumulative
-    max_dd = float(drawdown.max()) if len(drawdown) > 0 else 0.0
+    dd = running_max - cumulative
+    max_dd = float(dd.max()) if len(dd) > 0 else 0.0
 
-    # Nombre de trades
-    pos_changes = np.diff(positions)
-    n_trades = int(np.count_nonzero(pos_changes))
+    active = pnl_pips[pnl_pips != 0]
+    n_trades = len(active)
 
-    # Sharpe ratio
-    if len(pnl_per_bar) > 1 and np.std(pnl_per_bar) > 0:
-        sharpe = float(np.mean(pnl_per_bar) / np.std(pnl_per_bar) * ANNUALIZATION)
+    if len(pnl_pips) > 1 and np.std(pnl_pips) > 0:
+        sharpe = float(np.mean(pnl_pips) / np.std(pnl_pips) * ANNUALIZATION)
     else:
         sharpe = 0.0
 
-    # Profit factor
-    gains = pnl_per_bar[pnl_per_bar > 0]
-    losses = pnl_per_bar[pnl_per_bar < 0]
-    if len(losses) > 0 and abs(losses.sum()) > 0:
-        pf = float(gains.sum() / abs(losses.sum()))
-    else:
-        pf = float("inf") if len(gains) > 0 else 0.0
-
-    # Win rate
-    active = pnl_per_bar[pnl_per_bar != 0]
-    win_rate = float((active > 0).sum() / len(active) * 100) if len(active) > 0 else 0.0
+    gains = active[active > 0] if len(active) > 0 else np.array([])
+    losses = active[active < 0] if len(active) > 0 else np.array([])
+    pf = float(gains.sum() / abs(losses.sum())) if len(losses) > 0 and abs(losses.sum()) > 0 else 0.0
+    wr = float(len(gains) / len(active) * 100) if len(active) > 0 else 0.0
 
     return {
         "strategy": label,
-        "profit_cumule_pips": round(total_profit, 2),
-        "max_drawdown_pips": round(max_dd, 2),
-        "sharpe_ratio": round(sharpe, 4),
+        "profit_pips": round(total, 1),
+        "max_dd_pips": round(max_dd, 1),
+        "sharpe": round(sharpe, 4),
         "profit_factor": round(pf, 4),
         "n_trades": n_trades,
-        "win_rate": round(win_rate, 2),
-        "cumulative_curve": cumulative,
+        "win_rate": round(wr, 1),
+        "curve": cumulative,
     }
 
 
-def backtest_signals(close, positions):
-    """Backtest a partir de signaux de position (-1, 0, +1)."""
+def backtest_signals(close, positions, spread=2):
     n = len(close)
-    pnl_per_bar = np.zeros(n - 1)
-
-    for i in range(1, n):
-        price_change = (close[i] - close[i - 1]) / PIP_VALUE
-        pnl = positions[i - 1] * price_change
-        if positions[i] != positions[i - 1]:
-            pnl -= SPREAD_PIPS
-        pnl_per_bar[i - 1] = pnl
-
-    return pnl_per_bar, positions
+    pnl = np.zeros(n - 1)
+    for i in range(n - 1):
+        p = (close[i + 1] - close[i]) / PIP_VALUE
+        pnl[i] = positions[i] * p
+        if i > 0 and positions[i] != positions[i - 1]:
+            pnl[i] -= spread
+    return pnl
 
 
-# =============================================================================
-# Strategie 1 : ALEATOIRE
-# =============================================================================
-def strategy_random(close, seed=42):
-    """BUY/SELL/HOLD aleatoire avec proba 1/3."""
+def strat_random(close, spread=2, seed=42):
     rng = np.random.RandomState(seed)
+    pos = rng.choice([-1, 0, 1], size=len(close))
+    pnl = backtest_signals(close, pos, spread)
+    return compute_metrics(pnl, "Random", spread)
+
+
+def strat_ema_cross(close, spread=2):
+    s = pd.Series(close)
+    e20 = s.ewm(span=20, adjust=False).mean().values
+    e50 = s.ewm(span=50, adjust=False).mean().values
     n = len(close)
-    positions = rng.choice([-1, 0, 1], size=n)
-    pnl, pos = backtest_signals(close, positions)
-    return compute_metrics(pnl, pos, "Random")
-
-
-# =============================================================================
-# Strategie 2 : REGLES FIXES (EMA Cross 20/50)
-# =============================================================================
-def strategy_ema_cross(close):
-    """EMA20 > EMA50 -> BUY, EMA20 < EMA50 -> SELL."""
-    close_s = pd.Series(close)
-    ema20 = close_s.ewm(span=20, adjust=False).mean().values
-    ema50 = close_s.ewm(span=50, adjust=False).mean().values
-
-    n = len(close)
-    positions = np.zeros(n, dtype=int)
+    pos = np.zeros(n, dtype=int)
     for i in range(1, n):
-        if ema20[i] > ema50[i]:
-            positions[i] = 1
-        elif ema20[i] < ema50[i]:
-            positions[i] = -1
+        if e20[i] > e50[i]:
+            pos[i] = 1
+        elif e20[i] < e50[i]:
+            pos[i] = -1
         else:
-            positions[i] = positions[i - 1]
+            pos[i] = pos[i - 1]
+    pnl = backtest_signals(close, pos, spread)
+    return compute_metrics(pnl, "Regles (EMA)", spread)
 
-    pnl, pos = backtest_signals(close, positions)
-    return compute_metrics(pnl, pos, "Regles (EMA Cross)")
 
+def strat_ml(close, spread=2):
+    path = os.path.join(MODELS_DIR, "v1", "best_ml_model.pkl")
+    obj = joblib.load(path)
+    model = obj["model"]
+    fc = obj["feature_cols"]
+    sc = obj["scaler"]
+    thr = obj.get("hold_threshold", 0.55)
 
-# =============================================================================
-# Strategie 3 : MACHINE LEARNING
-# =============================================================================
-def strategy_ml(close, timestamps):
-    """Backtest du meilleur modele ML avec seuil HOLD optimise."""
-    model_path = os.path.join(MODELS_DIR, "v1", "best_ml_model.pkl")
-    model_obj = joblib.load(model_path)
+    df = pd.read_parquet(os.path.join(FEATURES_DIR, "features_2024.parquet"))
+    X = df[fc].values
+    if sc is not None:
+        X = sc.transform(X)
+    X = np.nan_to_num(X, nan=0, posinf=0, neginf=0)
+    proba = model.predict_proba(X)[:, 1]
 
-    model = model_obj["model"]
-    feature_cols = model_obj["feature_cols"]
-    needs_scaling = model_obj["needs_scaling"]
-    scaler = model_obj["scaler"]
-    threshold = model_obj.get("hold_threshold", 0.55)
-
-    # Charger les features 2024
-    df_test = pd.read_parquet(os.path.join(FEATURES_DIR, "features_2024.parquet"))
-    X_test = df_test[feature_cols].values
-
-    if needs_scaling and scaler is not None:
-        X_test = scaler.transform(X_test)
-
-    y_proba = model.predict_proba(X_test)[:, 1]
-
-    # Backtest avec HOLD
-    n = len(close) - 1
-    pnl_pips = np.zeros(n)
-    positions = np.zeros(n + 1, dtype=int)
-
+    n = min(len(proba), len(close) - 1)
+    pnl = np.zeros(n)
     for i in range(n):
-        price_move = close[i + 1] - close[i]
-        if y_proba[i] >= threshold:
-            profit = (price_move - SPREAD_COST) / PIP_VALUE
-            pnl_pips[i] = profit
-            positions[i] = 1
-        elif y_proba[i] <= (1 - threshold):
-            profit = (-price_move - SPREAD_COST) / PIP_VALUE
-            pnl_pips[i] = profit
-            positions[i] = -1
-        # else HOLD
-
-    return compute_metrics(pnl_pips, positions, "ML (LogReg + HOLD)")
+        mv = close[i + 1] - close[i]
+        if proba[i] >= thr:
+            pnl[i] = (mv - spread * PIP_VALUE) / PIP_VALUE
+        elif proba[i] <= (1 - thr):
+            pnl[i] = (-mv - spread * PIP_VALUE) / PIP_VALUE
+    return compute_metrics(pnl, "ML", spread)
 
 
-# =============================================================================
-# Strategie 4 : REINFORCEMENT LEARNING (PPO)
-# =============================================================================
-def strategy_rl(close):
-    """Evaluation du modele RL PPO sur 2024."""
+def strat_rl(close, spread=2):
     from stable_baselines3 import PPO
-    from sklearn.preprocessing import StandardScaler as SS
-    import gymnasium as gym
-    from gymnasium import spaces
-
-    # Importer TradingEnv depuis t08
     sys.path.insert(0, os.path.join(PROJECT_ROOT, "training"))
     from t08_rl_training import TradingEnv, FEATURE_COLUMNS, load_and_prepare_data
 
-    # Charger le scaler (ajuste sur 2022)
-    scaler_path = os.path.join(MODELS_DIR, "v2", "scaler.joblib")
-    scaler = joblib.load(scaler_path)
-
-    # Charger et preparer les donnees 2024
-    features_2024, closes_2024, _, df_2024 = load_and_prepare_data(
-        os.path.join(FEATURES_DIR, "features_2024.parquet"),
-        scaler=scaler,
-        fit=False,
+    sc = joblib.load(os.path.join(MODELS_DIR, "v2", "scaler.joblib"))
+    feat, closes, _, _ = load_and_prepare_data(
+        os.path.join(FEATURES_DIR, "features_2024.parquet"), scaler=sc
     )
+    m = PPO.load(os.path.join(MODELS_DIR, "v2", "best_rl_model.zip"))
+    env = TradingEnv(feat, closes)
 
-    # Charger le modele PPO
-    model_path = os.path.join(MODELS_DIR, "v2", "best_rl_model.zip")
-    model = PPO.load(model_path)
-
-    # Creer l'environnement de test
-    env = TradingEnv(
-        features=features_2024,
-        closes=closes_2024,
-        transaction_cost=SPREAD_COST,
-    )
-
-    # Evaluer
-    obs, info = env.reset()
+    obs, _ = env.reset()
     done = False
-    step_pnls = []
-    positions_list = [0]
-
+    pnls = []
     while not done:
-        action, _ = model.predict(obs, deterministic=True)
-        prev_pnl = env.cumulative_pnl + env.unrealized_pnl
-        obs, reward, terminated, truncated, info = env.step(int(action))
-        done = terminated or truncated
-        current_pnl = env.cumulative_pnl + env.unrealized_pnl
-        step_pnls.append(current_pnl - prev_pnl)
-        positions_list.append(env.position)
+        a, _ = m.predict(obs, deterministic=True)
+        prev = env.cumulative_pnl + env.unrealized_pnl
+        obs, _, term, trunc, info = env.step(int(a))
+        done = term or trunc
+        cur = env.cumulative_pnl + env.unrealized_pnl
+        pnls.append(cur - prev)
 
-    # Convertir le PnL en pips
-    step_pnls_pips = np.array(step_pnls) / PIP_VALUE
-    positions = np.array(positions_list)
-
-    return compute_metrics(step_pnls_pips, positions, "RL (PPO)")
+    return compute_metrics(np.array(pnls), "RL (PPO)", spread)
 
 
-# =============================================================================
-# Graphiques
-# =============================================================================
-def plot_comparison(results, timestamps, output_path):
-    """Equity curves comparatives de toutes les strategies."""
-    fig, ax = plt.subplots(figsize=(18, 8))
-
-    colors = {
-        "Random": "#e74c3c",
-        "Regles (EMA Cross)": "#f39c12",
-        "ML (LogReg + HOLD)": "#3498db",
-        "RL (PPO)": "#2ecc71",
-    }
-
-    for r in results:
-        name = r["strategy"]
-        curve = r["cumulative_curve"]
-        n = min(len(curve), len(timestamps) - 1)
-        ts = timestamps[:n]
-        c = curve[:n]
-        ax.plot(ts, c, label=f"{name} ({r['profit_cumule_pips']:+.0f} pips)",
-                color=colors.get(name, "#95a5a6"), linewidth=1.5, alpha=0.9)
-
-    ax.axhline(y=0, color="gray", linestyle="--", linewidth=0.8, alpha=0.5)
-    ax.set_title(
-        "Evaluation Finale -- Comparaison des 4 strategies sur 2024\n"
-        "GBP/USD M15 | Spread = 2 pips",
-        fontsize=14, fontweight="bold", pad=15
-    )
-    ax.set_xlabel("Date", fontsize=12)
-    ax.set_ylabel("Profit cumule (pips)", fontsize=12)
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %Y"))
-    ax.xaxis.set_major_locator(mdates.MonthLocator())
-    plt.xticks(rotation=45)
-    ax.legend(fontsize=11, loc="best")
-    ax.grid(True, alpha=0.3)
-    plt.tight_layout()
-    fig.savefig(output_path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"  -> {output_path}")
-
-
-# =============================================================================
-# MAIN
-# =============================================================================
 def main():
     print("=" * 70)
-    print("  T09 -- EVALUATION FINALE : COMPARAISON DES 4 STRATEGIES")
-    print("  GBP/USD M15 -- Test 2024")
+    print("  T09 -- EVALUATION FINALE")
+    print("  Comparaison des 4 strategies + Stress Tests | 2024")
     print("=" * 70)
 
     os.makedirs(EVAL_DIR, exist_ok=True)
 
-    # Charger les donnees 2024
-    print("\n  --- Chargement des donnees 2024 ---")
     df_clean = pd.read_parquet(os.path.join(DATA_DIR, "m15_clean.parquet"))
     df_2024 = df_clean[df_clean["year"] == 2024].reset_index(drop=True)
-    close_2024 = df_2024["close_15m"].values
+    close = df_2024["close_15m"].values
     timestamps = pd.to_datetime(df_2024["timestamp"].values)
-    print(f"  Bougies M15 2024 : {len(df_2024):,}")
+    print(f"\n  Bougies M15 2024 : {len(df_2024):,}")
 
-    # --- Strategie 1 : Random ---
-    print("\n  [1/4] Strategie Random...")
-    r_random = strategy_random(close_2024)
-    print(f"    Profit: {r_random['profit_cumule_pips']:+.2f} pips | "
-          f"Sharpe: {r_random['sharpe_ratio']:.4f}")
+    # --- Strategies ---
+    print("\n  [1/3] Evaluation (spread=2 pips)...")
+    sys.path.insert(0, os.path.join(PROJECT_ROOT, "training"))
 
-    # --- Strategie 2 : Regles (EMA Cross) ---
-    print("\n  [2/4] Strategie Regles (EMA Cross 20/50)...")
-    r_rules = strategy_ema_cross(close_2024)
-    print(f"    Profit: {r_rules['profit_cumule_pips']:+.2f} pips | "
-          f"Sharpe: {r_rules['sharpe_ratio']:.4f}")
+    results = []
+    for name, func in [
+        ("Random", lambda: strat_random(close)),
+        ("EMA Cross", lambda: strat_ema_cross(close)),
+        ("ML", lambda: strat_ml(close)),
+        ("RL (PPO)", lambda: strat_rl(close)),
+    ]:
+        print(f"\n    {name}...")
+        try:
+            r = func()
+            results.append(r)
+            print(f"      Profit={r['profit_pips']:+.1f} | Sharpe={r['sharpe']:.4f} | Trades={r['n_trades']}")
+        except Exception as e:
+            print(f"      [ERREUR: {e}]")
 
-    # --- Strategie 3 : ML ---
-    print("\n  [3/4] Strategie ML...")
-    r_ml = strategy_ml(close_2024, timestamps)
-    print(f"    Profit: {r_ml['profit_cumule_pips']:+.2f} pips | "
-          f"Sharpe: {r_ml['sharpe_ratio']:.4f}")
-
-    # --- Strategie 4 : RL ---
-    print("\n  [4/4] Strategie RL (PPO)...")
-    r_rl = strategy_rl(close_2024)
-    print(f"    Profit: {r_rl['profit_cumule_pips']:+.2f} pips | "
-          f"Sharpe: {r_rl['sharpe_ratio']:.4f}")
-
-    # --- Tableau comparatif ---
-    results = [r_random, r_rules, r_ml, r_rl]
-
-    print(f"\n{'=' * 90}")
-    print("  TABLEAU COMPARATIF FINAL -- TEST 2024")
-    print(f"{'=' * 90}")
-    header = (f"  {'Strategie':<22} {'Profit(pips)':>14} {'MaxDD(pips)':>12} "
-              f"{'Sharpe':>10} {'PF':>10} {'Trades':>8} {'WinRate':>8}")
-    print(header)
-    print("  " + "-" * 86)
-
+    # --- Tableau ---
+    print(f"\n{'='*90}")
+    print("  TABLEAU COMPARATIF -- TEST 2024 (spread=2 pips)")
+    print(f"{'='*90}")
+    print(f"  {'Strategie':<20} {'Profit(pips)':>12} {'MaxDD(pips)':>12} {'Sharpe':>10} {'PF':>8} {'Trades':>8} {'WR':>7}")
+    print(f"  {'-'*80}")
     for r in results:
-        print(f"  {r['strategy']:<22} "
-              f"{r['profit_cumule_pips']:>+14.2f} "
-              f"{r['max_drawdown_pips']:>12.2f} "
-              f"{r['sharpe_ratio']:>10.4f} "
-              f"{r['profit_factor']:>10.4f} "
-              f"{r['n_trades']:>8} "
-              f"{r['win_rate']:>7.1f}%")
+        print(f"  {r['strategy']:<20} {r['profit_pips']:>+12.1f} {r['max_dd_pips']:>12.1f} {r['sharpe']:>10.4f} {r['profit_factor']:>8.4f} {r['n_trades']:>8} {r['win_rate']:>6.1f}%")
 
-    # Identifier le meilleur modele
-    best = max(results, key=lambda x: x["sharpe_ratio"])
-    print(f"\n  >> Meilleur modele (Sharpe) : {best['strategy']} "
-          f"(Sharpe = {best['sharpe_ratio']:.4f})")
+    best = max(results, key=lambda x: x["sharpe"])
+    print(f"\n  >> MEILLEUR : {best['strategy']} (Sharpe = {best['sharpe']:.4f})")
 
-    # Robustesse : le modele est valide s'il bat le random
-    for r in results[2:]:  # ML et RL
-        if r["sharpe_ratio"] > r_random["sharpe_ratio"]:
-            print(f"  >> {r['strategy']} : ROBUSTE sur 2024 (bat le random)")
-        else:
-            print(f"  >> {r['strategy']} : NON ROBUSTE sur 2024")
+    # --- Stress Test ---
+    print(f"\n{'='*70}")
+    print("  [2/3] STRESS TEST : Impact du spread")
+    print(f"{'='*70}")
 
-    # --- Sauvegarde CSV ---
-    rows = []
-    for r in results:
-        rows.append({
-            "strategy": r["strategy"],
-            "profit_cumule_pips": r["profit_cumule_pips"],
-            "max_drawdown_pips": r["max_drawdown_pips"],
-            "sharpe_ratio": r["sharpe_ratio"],
-            "profit_factor": r["profit_factor"],
-            "n_trades": r["n_trades"],
-            "win_rate": r["win_rate"],
+    spreads = [1, 2, 3, 4, 5]
+    stress = []
+    for sp in spreads:
+        r_rand = strat_random(close, spread=sp)
+        r_ema = strat_ema_cross(close, spread=sp)
+        r_rl = strat_rl(close, spread=sp)
+        stress.append({
+            "spread": sp,
+            "random_sharpe": r_rand["sharpe"],
+            "ema_sharpe": r_ema["sharpe"],
+            "rl_sharpe": r_rl["sharpe"],
+            "rl_profit": r_rl["profit_pips"],
         })
-    df_results = pd.DataFrame(rows)
-    csv_path = os.path.join(EVAL_DIR, "final_comparison.csv")
-    df_results.to_csv(csv_path, index=False)
-    print(f"\n  -> Resultats CSV : {csv_path}")
 
-    # --- Sauvegarde JSON ---
-    json_path = os.path.join(EVAL_DIR, "final_comparison.json")
-    with open(json_path, "w") as f:
+    print(f"\n  {'Spread':>7} {'Random':>10} {'EMA':>10} {'RL':>10} {'RL PnL':>12}")
+    print(f"  {'-'*52}")
+    for s in stress:
+        print(f"  {s['spread']:>5} pip {s['random_sharpe']:>10.4f} {s['ema_sharpe']:>10.4f} {s['rl_sharpe']:>10.4f} {s['rl_profit']:>+12.1f}")
+
+    # --- Graphiques ---
+    print(f"\n{'='*70}")
+    print("  [3/3] GRAPHIQUES")
+    print(f"{'='*70}")
+
+    fig, axes = plt.subplots(2, 1, figsize=(18, 12), gridspec_kw={"height_ratios": [3, 1]})
+    colors = {"Random": "#e74c3c", "Regles (EMA)": "#f39c12", "ML": "#3498db", "RL (PPO)": "#2ecc71"}
+
+    ax = axes[0]
+    for r in results:
+        c = r["curve"]
+        n = min(len(c), len(timestamps) - 1)
+        ax.plot(timestamps[:n], c[:n],
+                label=f"{r['strategy']} ({r['profit_pips']:+.0f} pips)",
+                color=colors.get(r["strategy"], "#95a5a6"), linewidth=1.5, alpha=0.85)
+    ax.axhline(y=0, color="gray", linestyle="--", linewidth=0.8)
+    ax.set_title("Evaluation Finale -- Equity Curves | GBP/USD M15 | 2024\nSpread = 2 pips",
+                 fontsize=14, fontweight="bold")
+    ax.set_ylabel("Profit cumule (pips)", fontsize=12)
+    ax.legend(fontsize=11, loc="best")
+    ax.grid(True, alpha=0.3)
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %Y"))
+
+    ax2 = axes[1]
+    for key, label, color in [("rl_sharpe", "RL (PPO)", "#2ecc71"), ("ema_sharpe", "EMA Cross", "#f39c12")]:
+        vals = [s[key] for s in stress]
+        ax2.plot(spreads, vals, marker="o", label=label, color=color, linewidth=2)
+    ax2.axhline(y=0, color="gray", linestyle="--", linewidth=0.8)
+    ax2.set_xlabel("Spread (pips)", fontsize=12)
+    ax2.set_ylabel("Sharpe Ratio", fontsize=12)
+    ax2.set_title("Stress Test : Impact du spread", fontsize=12, fontweight="bold")
+    ax2.legend(fontsize=10)
+    ax2.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    fig.savefig(os.path.join(EVAL_DIR, "final_equity_curves.png"), dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"  -> evaluation/final_equity_curves.png")
+
+    # --- Save ---
+    rows = [{k: v for k, v in r.items() if k != "curve"} for r in results]
+    pd.DataFrame(rows).to_csv(os.path.join(EVAL_DIR, "final_comparison.csv"), index=False)
+    pd.DataFrame(stress).to_csv(os.path.join(EVAL_DIR, "final_stress_test.csv"), index=False)
+    with open(os.path.join(EVAL_DIR, "final_comparison.json"), "w") as f:
         json.dump(rows, f, indent=2)
-    print(f"  -> Resultats JSON : {json_path}")
 
-    # --- Graphique comparatif ---
-    print("\n  --- Graphiques ---")
-    plot_comparison(results, timestamps, os.path.join(EVAL_DIR, "final_equity_curves.png"))
-
-    print(f"\n{'=' * 70}")
+    print(f"\n{'='*70}")
     print(f"  T09 TERMINE -- Evaluation finale complete")
-    print(f"{'=' * 70}")
+    print(f"{'='*70}")
 
 
 if __name__ == "__main__":
