@@ -1,0 +1,35 @@
+{
+  "models": [
+    {
+      "version": "v1",
+      "type": "ml",
+      "algorithm": "LogisticRegression",
+      "path": "models/v1/best_ml_model.pkl",
+      "metrics": {
+        "accuracy": 0.5158,
+        "f1": 0.4663,
+        "auc_roc": 0.5183,
+        "sharpe": -14.0228,
+        "profit_pips_val": -90.0
+      },
+      "created_at": "2026-02-11T14:55:00",
+      "is_production": false
+    },
+    {
+      "version": "v2",
+      "type": "rl",
+      "algorithm": "PPO",
+      "path": "models/v2/best_rl_model.zip",
+      "metrics": {
+        "sharpe": 1.2436,
+        "cumulative_pnl": 0.1226,
+        "max_drawdown": 0.0823,
+        "num_trades": 866
+      },
+      "created_at": "2026-02-11T14:52:53",
+      "is_production": true
+    }
+  ],
+  "last_updated": "2026-02-11T15:00:00",
+  "production_version": "v2"
+}
