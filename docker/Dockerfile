@@ -16,6 +16,7 @@ LABEL version="1.0.0"
 # Variables d'environnement
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+ENV PIP_DEFAULT_TIMEOUT=300
 
 # Répertoire de travail
 WORKDIR /app
@@ -26,10 +27,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# Copier et installer les dépendances Python
-COPY docker/requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+# Upgrade pip
+RUN pip install --no-cache-dir --upgrade pip
+
+# Couche 1 : API (leger)
+RUN pip install --no-cache-dir fastapi "uvicorn[standard]" pydantic
+
+# Couche 2 : Data processing
+RUN pip install --no-cache-dir numpy pandas pyarrow joblib
+
+# Couche 3 : scikit-learn (necessaire pour les modeles ML)
+RUN pip install --no-cache-dir scikit-learn
+
+# Couche 4 : xgboost CPU only (sans nvidia-nccl)
+RUN pip install --no-cache-dir "xgboost<3" lightgbm
+
+# Couche 5 : PyTorch CPU (version legere pour stable-baselines3)
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
+# Couche 6 : Reinforcement Learning
+RUN pip install --no-cache-dir stable-baselines3 gymnasium
 
 # Copier le code de l'API
 COPY api/ /app/api/
